@@ -35,85 +35,62 @@ function cleanMarkdown(text: string): string {
 
 // Генерация commit message через API
 async function generateCommitMessage(diff: string, files: string[]): Promise<{header: string, body: string}> {
-  const prompt = `Analyze the git diff and create a comprehensive commit message.
+  const prompt = `Analyze the git diff and generate a conventional commit message with header and body.
 
 Staged files: ${files.join(', ')}
 
 Git diff:
 ${diff}
 
-Create a commit message with this structure:
+Generate exactly two lines without any labels:
+First line: Header in format "type(scope): description" (max 50 chars)
+Second line: Body describing the purpose and impact (2-3 sentences)
 
-HEADER: <type>(<scope>): <short description>
-BODY: <detailed explanation>
+STRICT RULES:
+- Header MUST follow: <type>(<scope>): <description>
+- Types: feat, fix, refactor, perf, chore, docs ONLY
+- Scope: specific component from changed files
+- Description: imperative mood, under 50 chars, what changed
+- Body: 2-3 sentences MAX, specific purpose and user benefit
+- NO "Line 1:", "Line 2:", "Header:", "Body:" labels
+- NO generic terms like "improve", "enhance", "update", "extend"
+- NO implementation details like "add function", "update imports"
+- NO file names in description
+- If multiple changes, focus on the main significant one
 
-RULES FOR HEADER:
-- Use conventional commit format: <type>(<scope>): <description>
-- Types: feat, fix, docs, style, refactor, perf, test, chore, build, ci, revert
-- Scope: main component or area being modified (e.g., auth, chat, ui, api)
-- Description: imperative mood, max 50 characters, focus on WHAT changed
-- Examples: "feat(chat): add message read receipts", "fix(auth): resolve login timeout"
+Examples:
+feat(chat): add message reactions
+Users can react with emojis for quick feedback without typing messages. Increases engagement in conversations.
 
-RULES FOR BODY:
-- Explain the PURPOSE and CONTEXT of changes
-- Describe WHAT problem is being solved and WHY
-- Mention user impact or benefits
-- List main changes briefly (2-3 key points)
-- Keep it concise but informative (3-5 sentences)
-- Avoid implementation details, function names, file paths
+fix(auth): resolve session expiration
+Extend token lifetime from 1 to 4 hours. Users remain logged in during typical work sessions.
 
-IMPORTANT: 
-- DO NOT include "Line 1:", "Line 2:", "HEADER:" or "BODY:" labels in your response
-- Start directly with the header line, then empty line, then body
+refactor(images): optimize file loading
+Implement lazy loading for attachments. Reduces initial page load time by 30%.
 
-Good example:
-feat(chat): enhance user profile display
-Add user avatars and online status indicators to chat headers. Improve user identification in group chats and provide better visual feedback for active participants. Includes profile picture loading and status synchronization.
-
-Now generate the commit message:`;
+Now generate exactly two lines without any labels:`;
   
   try {
-    const apiUrl = process.env.OCO_API_URL || 'http://localhost:11434/api/generate';
-    const model = process.env.OCO_MODEL || 'qwen2.5-coder:14b';
-    
-    const res = await axios.post(apiUrl, {
-      model: model,
+    const res = await axios.post(process.env.OCO_API_URL ?? '', {
+      model: process.env.OCO_MODEL,
       prompt,
       stream: false
     });
     
     const response = res.data.response.trim();
-    console.log('Raw AI response:', response); // Для отладки
     
-    // Убираем возможные метки Line 1, Line 2, HEADER, BODY
-    let cleanedResponse = response
-      .replace(/^(Line\s*\d+:\s*|HEADER:\s*|BODY:\s*)/gmi, '')
-      .replace(/\n(Line\s*\d+:\s*|HEADER:\s*|BODY:\s*)/gmi, '\n');
-    
-    // Разделяем на header и body
-    const lines = cleanedResponse.split('\n').filter((line: string) => line.trim() !== '');
+    // Обрабатываем ответ - разбиваем на строки
+    const lines = response.split('\n').filter((line:string ) => line.trim() !== '');
     
     let header = "";
     let body = "";
     
     if (lines.length >= 2) {
-      // Первая непустая строка - header, остальные - body
+      // Берём первую строку как header, остальные как body
       header = cleanMarkdown(lines[0]);
-      
-      // Ищем body - все строки после header до следующего заголовка или до конца
-      const bodyLines = [];
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        // Если встречаем что-то похожее на новый header, останавливаемся
-        if (line.match(/^(feat|fix|docs|style|refactor|perf|test|chore|build|ci|revert)\(.*\):/)) {
-          break;
-        }
-        if (line) {
-          bodyLines.push(line);
-        }
-      }
-      body = cleanMarkdown(bodyLines.join(' '));
+      body = cleanMarkdown(lines.slice(1).join(' '));
     } else if (lines.length === 1) {
+      // Если только одна строка, используем её как header
       header = cleanMarkdown(lines[0]);
       body = "";
     } else {
@@ -121,9 +98,6 @@ Now generate the commit message:`;
       header = "chore: update changes";
       body = "Apply various code improvements and updates";
     }
-    
-    // Дополнительная очистка header от остатков разметки
-    header = header.replace(/^[^a-z]*([a-z])/i, '$1');
     
     return { header, body };
   } catch (err) {
